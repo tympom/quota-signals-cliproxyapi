@@ -1,0 +1,21 @@
+[extend]
+useDefault = true
+# Replaced by env-secret-assignment below, which ignores placeholders and SOPS ciphertext.
+disabledRules = ["generic-password"]
+
+[[rules]]
+id = "env-secret-assignment"
+description = "Secret-named variable with a literal value; use a your_* placeholder or a *.sops.env file"
+regex = '''(?im)^[ \t]*-?[ \t]*[A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|PRIVATE_KEY|AUTHKEY|AUTH_KEY|API_KEY|CLIENT_ID)[ \t]*[=:][ \t]*['"]?([^'"\s#]{4,})'''
+secretGroup = 1
+filter = '''
+matchesAny(finding["secret"], [`^your_`, `^\$\{`, `^ENC\[`])
+'''
+
+[[rules]]
+id = "dsn-password"
+description = "Password inside a database connection string"
+regex = '''(?i)(?:(?:^|[\s;?&'"])password=([^\s'"/;&]{4,})|://[^:/\s@]+:([^@\s'"/]{4,})@)'''
+filter = '''
+matchesAny(finding["match"], [`(?i)password=['"]?your_`, `:your_[^@]*@`, `\$\{`, `://user:pass@`])
+'''

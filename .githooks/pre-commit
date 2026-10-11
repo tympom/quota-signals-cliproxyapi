@@ -1,0 +1,17 @@
+#!/bin/sh
+# Blocks commits that would add plaintext secrets. Enable per clone:
+#   git config core.hooksPath .githooks
+set -eu
+
+command -v betterleaks >/dev/null || { echo "pre-commit: betterleaks not installed" >&2; exit 1; }
+
+status=0
+for f in $(git diff --cached --name-only --diff-filter=ACMR -- '*.sops.env'); do
+    if ! git show ":$f" | grep -q '^sops_mac=ENC\['; then
+        echo "pre-commit: $f is not SOPS-encrypted" >&2
+        status=1
+    fi
+done
+
+betterleaks git --pre-commit --staged --redact --no-banner . || status=1
+exit $status

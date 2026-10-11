@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "quota-signals",
+      "name": "Quota Signals",
+      "description": "Serves the latest Claude and Codex 5h and 7d rate-limit windows, read passively from upstream response headers, as JSON for status lines.",
+      "author": "tympom",
+      "version": "0.1.0",
+      "repository": "https://github.com/tympom/quota-signals-cliproxyapi",
+      "homepage": "https://github.com/tympom/quota-signals-cliproxyapi",
+      "tags": ["quota", "usage", "claude", "codex"]
+    }
+  ]
+}

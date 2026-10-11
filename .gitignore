@@ -1,0 +1,34 @@
+## macOS
+.DS_Store
+__MACOSX/
+.AppleDouble
+.LSOverride
+Icon[]
+._*
+*.icloud
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+## Editors
+*.bbprojectd/**
+.nova
+.zed
+
+## Syncthing
+.stignore
+.stfolder
+
+## SSH
+known_hosts
+
+## Python
+__pycache__/
+*.py[cod]
+
+## Build output
+dist/
