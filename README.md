@@ -1,6 +1,6 @@
 # quota-signals-cliproxyapi
 
-A [CLIProxyAPI](https://help.router-for.me/plugin/development) plugin that serves the latest Claude and Codex 5-hour and weekly rate-limit windows as JSON, for status lines of clients that reach those models through the proxy.
+A [CLIProxyAPI](https://help.router-for.me/plugin/development) plugin that shows the latest Claude and Codex 5-hour and weekly rate-limit windows in the Management Center and serves them as JSON for client status lines.
 
 It makes no upstream calls. CLIProxyAPI hands every completed request's upstream response headers to usage plugins; this plugin keeps the windows they carry, per proxy account, in memory:
 
@@ -21,6 +21,20 @@ plugins:
 ```
 
 Then install **Quota Signals** from the Management Center's Plugin Store page and restart CLIProxyAPI. The plugin has no configuration.
+
+## Interface
+
+The Plugin Store shows a quota-gauge icon; the installed plugin serves the same icon locally. Open **Quota Signals** in the Management Center's plugin menu, or visit:
+
+```
+GET /v0/resource/plugins/quota-signals/panel
+```
+
+The panel shows used percentages, reported reset times and each provider's last observation time. Missing providers/windows are shown as unreported, not as zero usage. Past reset times are marked as passed; usage is not assumed to have reset without new headers.
+
+**Refresh** reads the existing local snapshot without contacting providers. The panel uses the latest account observed per provider, with no client-key filtering; the JSON endpoint below still supports client-specific readings. It follows the Management Center's light/dark theme and falls back to the browser's preference when opened directly.
+
+Like the JSON endpoint, the panel and icon are unauthenticated plugin resources. They display no keys or account identities.
 
 ## Endpoint
 

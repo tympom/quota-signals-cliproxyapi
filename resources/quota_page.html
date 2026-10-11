@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quota Signals</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg-primary: #f0eee8;
+  --bg-secondary: #faf9f5;
+  --bg-tertiary: #e9e6df;
+  --text-primary: #2d2a26;
+  --text-secondary: #6d6760;
+  --border-color: #e3e1db;
+  --success-color: #188038;
+  --warning-color: #b06000;
+  --error-color: #b3261e;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-primary: #1d1b18;
+  --bg-secondary: #151412;
+  --bg-tertiary: #262320;
+  --text-primary: #f0eee8;
+  --text-secondary: #b8b1a8;
+  --border-color: #3c3833;
+  --success-color: #6cc78b;
+  --warning-color: #e9b45d;
+  --error-color: #f28b82;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px; color: var(--text-primary); background: var(--bg-secondary); font: 14px/1.5 system-ui, sans-serif; }
+.quota-page { max-width: 1000px; margin: 0 auto; }
+header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.logo { width: 48px; height: 48px; flex-shrink: 0; }
+h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+.description, .muted { color: var(--text-secondary); }
+.description { margin: 6px 0 0; }
+button { border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 12px; background: var(--bg-tertiary); color: var(--text-primary); font: inherit; cursor: pointer; }
+button:hover { background: var(--bg-primary); }
+button:disabled { cursor: wait; opacity: .6; }
+button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+header button { margin-left: auto; }
+.quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.quota-card { min-width: 0; border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; background: var(--bg-primary); }
+h2 { margin: 0 0 16px; font-size: 18px; }
+.quota-row { border-top: 1px solid var(--border-color); padding-top: 14px; margin-top: 14px; }
+.quota-row-header { display: flex; justify-content: space-between; gap: 12px; }
+.quota-percent { font-variant-numeric: tabular-nums; }
+.quota-track { height: 8px; margin: 8px 0; border-radius: 999px; overflow: hidden; background: var(--bg-tertiary); }
+.quota-fill { height: 100%; background: var(--success-color); }
+.quota-meta, .observed { color: var(--text-secondary); font-size: 12px; }
+.observed { margin: 18px 0 0; }
+.error { color: var(--error-color); }
+#status { min-height: 21px; }
+footer { margin-top: 24px; color: var(--text-secondary); font-size: 12px; }
+@media (max-width: 640px) {
+  body { padding: 20px 16px; }
+  header { flex-wrap: wrap; gap: 12px; }
+  header button { margin-left: 0; }
+  .quota-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="quota-page">
+  <header>
+    <img class="logo" src="./icon.svg" alt="">
+    <div>
+      <h1>Quota Signals</h1>
+      <p class="description">Claude and Codex rate-limit windows.</p>
+    </div>
+    <button id="refresh" type="button">Refresh</button>
+  </header>
+  <p id="status" class="muted" role="status" aria-live="polite">Loading quota signals...</p>
+  <main id="app" class="quota-grid" aria-label="Provider quotas"></main>
+  <footer>
+    Latest account observed per provider. Readings update only when proxy requests return quota headers.
+    Refresh reads the local snapshot; it does not contact providers. Restarting the proxy clears readings.
+  </footer>
+</div>
+<script>
+(() => {
+  const root = document.documentElement;
+  const preferredTheme = window.matchMedia("(prefers-color-scheme: dark)");
+  let parentRoot;
+  try {
+    if (window.parent !== window) parentRoot = window.parent.document.documentElement;
+  } catch (_) {}
+  const syncTheme = () => {
+    const theme = parentRoot && parentRoot.getAttribute("data-theme");
+    root.setAttribute("data-theme", theme === "dark" || theme === "white" ? theme : preferredTheme.matches ? "dark" : "white");
+    const secondary = parentRoot && getComputedStyle(parentRoot).getPropertyValue("--bg-secondary").trim();
+    if (secondary) root.style.setProperty("--bg-secondary", secondary);
+    else root.style.removeProperty("--bg-secondary");
+  };
+  syncTheme();
+  preferredTheme.addEventListener("change", syncTheme);
+  if (parentRoot) new MutationObserver(syncTheme).observe(parentRoot, {attributes: true, attributeFilter: ["data-theme"]});
+
+  const app = document.getElementById("app");
+  const status = document.getElementById("status");
+  const refreshButton = document.getElementById("refresh");
+  const percentFormat = new Intl.NumberFormat(undefined, {maximumFractionDigits: 1});
+  const dateFormat = new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "short"});
+  const element = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const timestamp = (seconds) => dateFormat.format(new Date(seconds * 1000));
+  const render = (providers) => {
+    const cards = [];
+    for (const [provider, name] of [["claude", "Claude"], ["codex", "Codex"]]) {
+      const reading = providers[provider];
+      const card = element("section", "quota-card");
+      card.append(element("h2", "", name));
+      if (!reading) {
+        card.append(element("p", "muted", "No quota headers observed yet. Send a request through this provider to populate its windows."));
+      } else {
+        for (const [key, label] of [["5h", "5-hour window"], ["7d", "Weekly window"]]) {
+          const window = reading.windows[key];
+          const row = element("div", "quota-row");
+          const heading = element("div", "quota-row-header");
+          heading.append(element("span", "", label));
+          if (!window) {
+            heading.append(element("span", "muted", "Not reported"));
+            row.append(heading);
+          } else {
+            heading.append(element("span", "quota-percent", percentFormat.format(window.used_percent) + "% used"));
+            const track = element("div", "quota-track");
+            track.setAttribute("role", "progressbar");
+            track.setAttribute("aria-label", name + " " + label + " used");
+            track.setAttribute("aria-valuemin", "0");
+            track.setAttribute("aria-valuemax", "100");
+            track.setAttribute("aria-valuenow", String(window.used_percent));
+            const fill = element("div", "quota-fill");
+            fill.style.width = window.used_percent + "%";
+            fill.style.backgroundColor = window.used_percent >= 90 ? "var(--error-color)" : window.used_percent >= 75 ? "var(--warning-color)" : "var(--success-color)";
+            track.append(fill);
+            const reset = !window.resets_at ? "Reset time not reported" : (window.resets_at * 1000 <= Date.now() ? "Reported reset passed: " : "Resets: ") + timestamp(window.resets_at);
+            row.append(heading, track, element("div", "quota-meta", reset));
+          }
+          card.append(row);
+        }
+        card.append(element("p", "observed", "Last observed: " + timestamp(reading.observed_at)));
+      }
+      cards.push(card);
+    }
+    app.replaceChildren(...cards);
+  };
+  const refresh = async () => {
+    refreshButton.disabled = true;
+    status.className = "muted";
+    status.textContent = "Reading local snapshot...";
+    try {
+      const response = await fetch(new URL("./quota", location.href), {cache: "no-store", credentials: "omit"});
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const snapshot = await response.json();
+      render(snapshot.providers);
+      status.textContent = Object.keys(snapshot.providers).length ? "Snapshot loaded. See each provider's last observation time below." : "No readings yet. Waiting for Claude or Codex response headers.";
+    } catch (_) {
+      status.className = "error";
+      status.textContent = "Could not load quota signals. Displayed readings, if any, are from the previous refresh.";
+    } finally {
+      refreshButton.disabled = false;
+    }
+  };
+  refreshButton.addEventListener("click", refresh);
+  refresh();
+})();
+</script>
+</body>
+</html>

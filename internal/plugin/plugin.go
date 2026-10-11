@@ -1,6 +1,4 @@
-// Package plugin implements the CLIProxyAPI plugin RPC methods: a usage
-// observer that feeds quota.Store, and one unauthenticated resource route
-// that returns its snapshot as JSON.
+// Package plugin implements the CLIProxyAPI usage observer and browser resources.
 package plugin
 
 import (
@@ -13,6 +11,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 
 	"quota-signals-cliproxyapi/internal/quota"
+	"quota-signals-cliproxyapi/resources"
 )
 
 // Version is set at build time with -ldflags "-X ...plugin.Version=<v>".
@@ -20,6 +19,8 @@ var Version = "0.0.0-dev"
 
 // ResourcePath is the route under /v0/resource/plugins/<pluginID>/.
 const ResourcePath = "/quota"
+
+const resourceBasePath = "/v0/resource/plugins/quota-signals"
 
 type registration struct {
 	SchemaVersion uint32             `json:"schema_version"`
@@ -68,6 +69,7 @@ func (p *Plugin) HandleCall(method string, request []byte) []byte {
 				Version:          Version,
 				Author:           "tympom",
 				GitHubRepository: "https://github.com/tympom/quota-signals-cliproxyapi",
+				Logo:             resourceBasePath + "/icon.svg",
 			},
 			Capabilities: capabilities{UsagePlugin: true, ManagementAPI: true},
 		})
@@ -91,18 +93,49 @@ func (p *Plugin) HandleCall(method string, request []byte) []byte {
 		})
 		return ok(struct{}{})
 	case pluginabi.MethodManagementRegister:
-		return ok(managementRegistration{Resources: []resourceRoute{{
-			Path:        ResourcePath,
-			Description: "Latest 5h and 7d rate-limit windows from Claude and Codex response headers.",
-		}}})
+		return ok(managementRegistration{Resources: []resourceRoute{
+			{Path: ResourcePath, Description: "Latest 5h and 7d rate-limit windows from Claude and Codex response headers."},
+			{Path: "/panel", Menu: "Quota Signals", Description: "View Claude and Codex quota windows from response headers."},
+			{Path: "/icon.svg", Description: "Quota Signals icon."},
+		}})
 	case pluginabi.MethodManagementHandle:
 		var req pluginapi.ManagementRequest
 		if err := json.Unmarshal(request, &req); err != nil {
 			return Failure("invalid_request", "management request is not valid JSON")
 		}
-		return ok(p.serveSnapshot(req))
+		return ok(p.serveResource(req))
 	default:
 		return Failure("unknown_method", "unknown method: "+method)
+	}
+}
+
+func (p *Plugin) serveResource(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	if req.Path != resourceBasePath+ResourcePath && req.Path != resourceBasePath+"/icon.svg" && req.Path != resourceBasePath+"/panel" {
+		return pluginapi.ManagementResponse{StatusCode: http.StatusNotFound}
+	}
+	if req.Method != http.MethodGet {
+		return pluginapi.ManagementResponse{
+			StatusCode: http.StatusMethodNotAllowed,
+			Headers:    http.Header{"Allow": {http.MethodGet}},
+		}
+	}
+	if req.Path == resourceBasePath+ResourcePath {
+		return p.serveSnapshot(req)
+	}
+	if req.Path == resourceBasePath+"/panel" {
+		return pluginapi.ManagementResponse{
+			StatusCode: http.StatusOK,
+			Headers: http.Header{
+				"Content-Type":  {"text/html; charset=utf-8"},
+				"Cache-Control": {"no-store"},
+			},
+			Body: resources.QuotaPage,
+		}
+	}
+	return pluginapi.ManagementResponse{
+		StatusCode: http.StatusOK,
+		Headers:    http.Header{"Content-Type": {"image/svg+xml"}},
+		Body:       resources.Icon,
 	}
 }
 
@@ -110,12 +143,6 @@ func (p *Plugin) HandleCall(method string, request []byte) []byte {
 // (Authorization: Bearer or x-api-key) to get the accounts that served its own
 // requests; the response never contains keys or account identities.
 func (p *Plugin) serveSnapshot(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
-	if req.Method != http.MethodGet {
-		return pluginapi.ManagementResponse{
-			StatusCode: http.StatusMethodNotAllowed,
-			Headers:    http.Header{"Allow": {http.MethodGet}},
-		}
-	}
 	body, err := json.Marshal(snapshotResponse{Providers: p.store.Snapshot(clientKey(req.Headers))})
 	if err != nil {
 		return pluginapi.ManagementResponse{StatusCode: http.StatusInternalServerError}
