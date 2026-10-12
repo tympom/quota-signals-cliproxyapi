@@ -31,6 +31,13 @@ type Reading struct {
 	Windows    map[string]Window `json:"windows"`
 }
 
+// RequestCounts counts completed model executions across all accounts and clients.
+type RequestCounts struct {
+	Total      int64 `json:"total"`
+	Successful int64 `json:"successful"`
+	Failed     int64 `json:"failed"`
+}
+
 // Observation is the subset of a CLIProxyAPI usage record this package reads.
 type Observation struct {
 	Provider  string
@@ -40,6 +47,7 @@ type Observation struct {
 	ClientKey string
 	Headers   http.Header
 	At        time.Time
+	Failed    bool
 }
 
 type accountKey struct {
@@ -56,7 +64,8 @@ type Store struct {
 	// clients maps a client key hash to the account that last served it, per provider.
 	clients map[keyHash]map[string]accountKey
 	// latest is the account that last served any client, per provider.
-	latest map[string]accountKey
+	latest   map[string]accountKey
+	requests map[string]RequestCounts
 }
 
 func NewStore() *Store {
@@ -64,12 +73,12 @@ func NewStore() *Store {
 		accounts: make(map[accountKey]Reading),
 		clients:  make(map[keyHash]map[string]accountKey),
 		latest:   make(map[string]accountKey),
+		requests: make(map[string]RequestCounts),
 	}
 }
 
-// Observe records the windows carried by one request's upstream headers.
-// Requests without quota headers (other providers, failures before upstream)
-// change nothing, so they cannot repoint a client at an account with no data.
+// Observe counts every usage record and records any supported quota windows.
+// Requests without quota headers cannot repoint a client at an account with no data.
 func (s *Store) Observe(o Observation) {
 	provider := strings.ToLower(strings.TrimSpace(o.Provider))
 	var windows map[string]Window
@@ -79,13 +88,21 @@ func (s *Store) Observe(o Observation) {
 	case "codex":
 		windows = parseCodex(o.Headers, o.At)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	counts := s.requests[provider]
+	counts.Total++
+	if o.Failed {
+		counts.Failed++
+	} else {
+		counts.Successful++
+	}
+	s.requests[provider] = counts
 	if len(windows) == 0 {
 		return
 	}
 	account := accountKey{provider: provider, authIndex: o.AuthIndex}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	previous, seen := s.accounts[account]
 	if seen && previous.ObservedAt > o.At.Unix() {
 		// An older request finishing late must not roll the windows back.
@@ -122,6 +139,18 @@ func (s *Store) Snapshot(clientKey string) map[string]Reading {
 		if reading, ok := s.accounts[account]; ok {
 			out[provider] = reading
 		}
+	}
+	return out
+}
+
+// Requests returns provider-wide counters since this store was created.
+// Client-key quota selection does not filter these counters.
+func (s *Store) Requests() map[string]RequestCounts {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]RequestCounts, len(s.requests))
+	for provider, counts := range s.requests {
+		out[provider] = counts
 	}
 	return out
 }

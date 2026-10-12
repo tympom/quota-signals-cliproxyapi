@@ -45,17 +45,20 @@ type resourceRoute struct {
 }
 
 type snapshotResponse struct {
-	Providers map[string]quota.Reading `json:"providers"`
+	Providers map[string]quota.Reading       `json:"providers"`
+	Requests  map[string]quota.RequestCounts `json:"requests"`
+	StartedAt int64                          `json:"started_at"`
 }
 
 // Plugin dispatches RPC methods to a quota.Store.
 type Plugin struct {
-	store *quota.Store
-	now   func() time.Time
+	store     *quota.Store
+	now       func() time.Time
+	startedAt time.Time
 }
 
 func New() *Plugin {
-	return &Plugin{store: quota.NewStore(), now: time.Now}
+	return &Plugin{store: quota.NewStore(), now: time.Now, startedAt: time.Now()}
 }
 
 // HandleCall answers one RPC method with a JSON envelope.
@@ -90,12 +93,13 @@ func (p *Plugin) HandleCall(method string, request []byte) []byte {
 			ClientKey: record.APIKey,
 			Headers:   record.ResponseHeaders,
 			At:        at,
+			Failed:    record.Failed,
 		})
 		return ok(struct{}{})
 	case pluginabi.MethodManagementRegister:
 		return ok(managementRegistration{Resources: []resourceRoute{
-			{Path: ResourcePath, Description: "Latest 5h and 7d rate-limit windows from Claude and Codex response headers."},
-			{Path: "/panel", Menu: "Quota Signals", Description: "View Claude and Codex quota windows from response headers."},
+			{Path: ResourcePath, Description: "Latest Claude and Codex quota windows and per-provider request counts since plugin start."},
+			{Path: "/panel", Menu: "Quota Signals", Description: "View quota windows and per-provider request counts since plugin start."},
 			{Path: "/icon.svg", Description: "Quota Signals icon."},
 		}})
 	case pluginabi.MethodManagementHandle:
@@ -143,7 +147,11 @@ func (p *Plugin) serveResource(req pluginapi.ManagementRequest) pluginapi.Manage
 // (Authorization: Bearer or x-api-key) to get the accounts that served its own
 // requests; the response never contains keys or account identities.
 func (p *Plugin) serveSnapshot(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
-	body, err := json.Marshal(snapshotResponse{Providers: p.store.Snapshot(clientKey(req.Headers))})
+	body, err := json.Marshal(snapshotResponse{
+		Providers: p.store.Snapshot(clientKey(req.Headers)),
+		Requests:  p.store.Requests(),
+		StartedAt: p.startedAt.Unix(),
+	})
 	if err != nil {
 		return pluginapi.ManagementResponse{StatusCode: http.StatusInternalServerError}
 	}

@@ -4,9 +4,9 @@
     {
       "id": "quota-signals",
       "name": "Quota Signals",
-      "description": "Shows the latest Claude and Codex 5h and 7d rate-limit windows in the Management Center and as JSON for status lines, read passively from upstream response headers.",
+      "description": "Shows per-provider request counts and the latest Claude and Codex 5h and 7d rate-limit windows in the Management Center and as JSON, without upstream calls.",
       "author": "tympom",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "repository": "https://github.com/tympom/quota-signals-cliproxyapi",
       "logo": "https://raw.githubusercontent.com/tympom/quota-signals-cliproxyapi/main/resources/icon.svg",
       "homepage": "https://github.com/tympom/quota-signals-cliproxyapi",

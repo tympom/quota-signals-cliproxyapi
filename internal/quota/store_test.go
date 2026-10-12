@@ -2,6 +2,7 @@ package quota
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 )
@@ -105,5 +106,30 @@ func TestLateOlderRequestDoesNotRollBack(t *testing.T) {
 	s.Observe(Observation{Provider: "claude", AuthIndex: "a", Headers: claudeHeaders("0.50", "0.20"), At: t0})
 	if got := s.Snapshot("")["claude"].Windows["5h"].UsedPercent; got != 60 {
 		t.Fatalf("5h = %v, want newer 60", got)
+	}
+}
+
+func TestConcurrentRequestCountsAndSnapshotIsolation(t *testing.T) {
+	s := NewStore()
+	var workers sync.WaitGroup
+	for range 64 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for i := range 40 {
+				s.Observe(Observation{Provider: "codex", Failed: i%2 == 0})
+				s.Requests()
+			}
+		}()
+	}
+	workers.Wait()
+	want := RequestCounts{Total: 2560, Successful: 1280, Failed: 1280}
+	if got := s.Requests()["codex"]; got != want {
+		t.Fatalf("counts = %+v, want %+v", got, want)
+	}
+	snapshot := s.Requests()
+	snapshot["codex"] = RequestCounts{}
+	if got := s.Requests()["codex"]; got != want {
+		t.Fatalf("caller mutated stored counts: %+v", got)
 	}
 }

@@ -87,3 +87,63 @@ func TestSnapshotClientSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestRequestCountsIncludeFailuresWithoutQuotaHeaders(t *testing.T) {
+	p := New()
+	for _, record := range []pluginapi.UsageRecord{
+		{Provider: "claude", AuthIndex: "a", APIKey: "client-a", RequestedAt: time.Unix(1791749198, 0), ResponseHeaders: http.Header{"Anthropic-Ratelimit-Unified-5h-Utilization": {"0.25"}}},
+		{Provider: " Claude ", AuthIndex: "b", APIKey: "client-b", Failed: true},
+		{Provider: "claude", AuthIndex: "a", RequestedAt: time.Unix(1791749197, 0), ResponseHeaders: http.Header{"Anthropic-Ratelimit-Unified-5h-Utilization": {"0.10"}}},
+		{Provider: "codex", Failed: true},
+		{Provider: "gemini"},
+	} {
+		request, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope pluginabi.Envelope
+		if err := json.Unmarshal(p.HandleCall(pluginabi.MethodUsageHandle, request), &envelope); err != nil || !envelope.OK {
+			t.Fatalf("usage call failed: %v, %+v", err, envelope.Error)
+		}
+	}
+	want := map[string]quota.RequestCounts{
+		"claude": {Total: 3, Successful: 2, Failed: 1},
+		"codex":  {Total: 1, Failed: 1},
+		"gemini": {Total: 1, Successful: 1},
+	}
+	// Client-key selection affects quotas, never provider-wide counters; reads
+	// must not add requests, even when repeatedly polled by a status line.
+	for range 10 {
+		response := managementResponse(t, p, pluginapi.ManagementRequest{
+			Method: http.MethodGet, Path: resourceBasePath + ResourcePath,
+			Headers: http.Header{"Authorization": {"Bearer client-a"}},
+		})
+		var snapshot snapshotResponse
+		if err := json.Unmarshal(response.Body, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Requests) != len(want) {
+			t.Fatalf("counts = %+v, want %+v", snapshot.Requests, want)
+		}
+		for provider, counts := range want {
+			if snapshot.Requests[provider] != counts {
+				t.Fatalf("%s counts = %+v, want %+v", provider, snapshot.Requests[provider], counts)
+			}
+		}
+		if snapshot.Providers["claude"].Windows["5h"].UsedPercent != 25 {
+			t.Fatalf("quota rolled back: %+v", snapshot.Providers)
+		}
+		if snapshot.StartedAt != p.startedAt.Unix() {
+			t.Fatalf("start time = %d, want %d", snapshot.StartedAt, p.startedAt.Unix())
+		}
+	}
+	fresh := New()
+	response := managementResponse(t, fresh, pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourceBasePath + ResourcePath})
+	var snapshot snapshotResponse
+	if err := json.Unmarshal(response.Body, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Requests) != 0 || len(snapshot.Providers) != 0 {
+		t.Fatalf("new plugin inherited usage: %+v", snapshot)
+	}
+}
