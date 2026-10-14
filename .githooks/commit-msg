@@ -1,0 +1,11 @@
+#!/bin/sh
+# Rejects Co-Authored-By lines in commit messages.
+set -eu
+
+LC_ALL=C awk '
+    tolower($0) ~ /^[[:blank:]]*co-authored-by[[:blank:]]*:/ {
+        printf "commit-msg: prohibited Co-Authored-By line %d: %s\n", NR, $0
+        rejected = 1
+    }
+    END { exit rejected }
+' "$1" >&2
