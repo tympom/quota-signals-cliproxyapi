@@ -17,5 +17,5 @@ id = "dsn-password"
 description = "Password inside a database connection string"
 regex = '''(?i)(?:(?:^|[\s;?&'"])password=([^\s'"/;&]{4,})|://[^:/\s@]+:([^@\s'"/]{4,})@)'''
 filter = '''
-matchesAny(finding["match"], [`(?i)password=['"]?your_`, `:your_[^@]*@`, `\$\{`, `://user:pass@`])
+matchesAny(finding["match"], [`(?i)password=['"]?your_`, `(?i)password=['"]?ENC\[AES256_GCM,`, `:your_[^@]*@`, `\$\{`, `://user:pass@`])
 '''

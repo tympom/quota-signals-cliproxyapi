@@ -4,14 +4,10 @@
 set -eu
 
 command -v betterleaks >/dev/null || { echo "pre-commit: betterleaks not installed" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "pre-commit: python3 not installed" >&2; exit 1; }
 
 status=0
-for f in $(git diff --cached --name-only --diff-filter=ACMR -- '*.sops.env'); do
-    if ! git show ":$f" | grep -q '^sops_mac=ENC\['; then
-        echo "pre-commit: $f is not SOPS-encrypted" >&2
-        status=1
-    fi
-done
+python3 "$(dirname "$0")/check-sops-env.py" || status=1
 
 betterleaks git --pre-commit --staged --redact --no-banner . || status=1
 exit $status
