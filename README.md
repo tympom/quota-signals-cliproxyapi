@@ -66,9 +66,9 @@ GET /v0/resource/plugins/quota-signals/quota
 
 ## Build
 
-Built and tested against CLIProxyAPI `v8.0.34` with Go 1.27.2. Available for Linux amd64 and arm64. To build locally without Go installed:
+Built and tested against CLIProxyAPI `v8.0.38` with Go 1.27.3. Available for Linux amd64 and arm64. To build locally without Go installed:
 
 ```sh
-docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/src -w /src golang:1.27.2 \
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/src -w /src golang:1.27.3 \
   sh -c 'go test ./... && CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -o dist/quota-signals.so .'
 ```
